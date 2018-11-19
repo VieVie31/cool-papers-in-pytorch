@@ -1,3 +1,7 @@
+"""
+Re-implemeting "Local Binary Convolutional Neural Networks" (CVPR '17)
+https://arxiv.org/pdf/1608.06049.pdf
+"""
 import numpy as np
 import matplotlib.pyplot as plt
 
