@@ -60,7 +60,7 @@ class SmallLBCNN(nn.Module):
             nn.MaxPool2d(2),
             LBConv2d(15, 48),
             nn.ReLU(),
-            nn.MaxPool2d(2)
+            nn.MaxPool2d(2),
         )
 
         self.clf = nn.Sequential(
@@ -79,36 +79,14 @@ optimizer = torch.optim.Adam([p for p in model.parameters() if p.requires_grad])
 loss_function = nn.CrossEntropyLoss()
 
 
-nb_epochs = 7
-train_history, test_history = [], []
+model.train()
+for x, y in tqdm(train_loader):
+    optimizer.zero_grad()
+    yhat = model(x.view([x.shape[0], 1, 28, 28]))
+    loss = loss_function(yhat, y)
+    loss.backward()
+    optimizer.step()
 
-for i in trange(nb_epochs):
-    model.train()
-    batch_loss = []
-    for x, y in train_loader:
-        optimizer.zero_grad()
-        yhat = model(x.view([x.shape[0], 1, 28, 28]))
-        loss = loss_function(yhat, y)
-        loss.backward()
-        optimizer.step()
-        batch_loss.append(loss.item())
-    train_history.append(np.array(batch_loss).mean())
-    model.eval()
-    batch_loss = []
-    for x, y in test_loader:
-        yhat = model(x.view([x.shape[0], 1, 28, 28]))
-        loss = loss_function(yhat, y)
-        batch_loss.append(loss.item())
-    test_history.append(np.array(batch_loss).mean())
-
-        
-
-
-plt.title("Loss MNIST")
-plt.plot(train_history, label='train')
-plt.plot(test_history, label='test') 
-plt.legend()
-plt.show()
 
 
 accuracy = []
@@ -117,7 +95,5 @@ for x, y in test_loader:
         continue
     yhat = model(x.view([batch_size, 1, 28, 28]))
     accuracy.append((yhat.argmax(1) == y).float().mean().item())
-print(np.mean(accuracy))
-
-
+print(np.mean(accuracy)) #0.9833733974358975
 
