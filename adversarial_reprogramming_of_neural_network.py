@@ -1,6 +1,8 @@
 """
 Re-implementation of "Adversarial Reprogramming of Neural Networks" (ICLR'19)
 https://arxiv.org/pdf/1806.11146.pdf
+
+More experiments done with : https://github.com/kcelia/adversarial_reprogramming_of_neural_network
 """
 import numpy as np
 
