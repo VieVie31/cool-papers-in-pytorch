@@ -9,6 +9,7 @@ Made in PyTorch.
 - Highway Networks (ICML'15)
 - Local Binary Convolutional Neural Networks (CVPR '17)
 - Adversarial Discriminative Domain Adaptation (CVPR '17)
+- Adversarial Reprogramming of Neural Networks (ICLR'19)
 - more soon...
 
 
