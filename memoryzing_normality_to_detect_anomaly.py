@@ -210,7 +210,8 @@ naive_th = np.array(classic_recontruction)[np.array(labels) == 9].mean() + 1.5 *
 
 print("classical AE f1 :",       f1_score(np.array(labels) == 9, classic_recontruction < naive_th))
 print("classical AE acc:", accuracy_score(np.array(labels) == 9, classic_recontruction < naive_th))
-
+#classical AE f1 : 0.1899810019
+#classical AE acc: 0.1899
 
 # Compare with the new method
 memae_recontruction = []
@@ -234,7 +235,8 @@ naive_th = np.array(memae_recontruction)[np.array(labels) == 9].mean() + 1.5 * n
 
 print("memory AE f1 :",       f1_score(np.array(labels) == 9, memae_recontruction < naive_th))
 print("memory AE acc:", accuracy_score(np.array(labels) == 9, memae_recontruction < naive_th))
-
+#memory AE f1 : 0.455628495016
+#memory AE acc: 0.7761
 
 
 
