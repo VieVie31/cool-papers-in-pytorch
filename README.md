@@ -10,7 +10,7 @@ Made in PyTorch.
 - Local Binary Convolutional Neural Networks (CVPR '17)
 - Adversarial Discriminative Domain Adaptation (CVPR '17)
 - Adversarial Reprogramming of Neural Networks (ICLR'19)
-- Memorizing Normality to Detect Anomaly: Memory-augmented Deep Autoencoder for Unsupervised Anomaly Detection (pre-print) (first exsperiments seems to work... TODO add reproducible experimetns...)
+- Memorizing Normality to Detect Anomaly: Memory-augmented Deep Autoencoder for Unsupervised Anomaly Detection (pre-print)
 - more soon...
 
 
