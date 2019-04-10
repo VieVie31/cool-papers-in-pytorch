@@ -14,6 +14,8 @@ from torch.nn.modules import *
 from tqdm import tqdm, trange
 from torchvision import datasets, transforms
 
+from sklearn.metrics import f1_score, accuracy_score
+
 
 T.set_default_tensor_type('torch.FloatTensor')
 
@@ -40,13 +42,21 @@ train_normals_loader = T.utils.data.DataLoader(
     shuffle=True
 ) 
 
+
+train_loader = T.utils.data.DataLoader(datasets.MNIST(
+    './data', train=True, download=True,
+    transform=transforms.Compose([
+        transforms.ToTensor(),
+    ])),
+    batch_size=batch_size, shuffle=True
+)
  
 test_loader = T.utils.data.DataLoader(datasets.MNIST(
     './data', train=False, download=True,
     transform=transforms.Compose([
         transforms.ToTensor(),
     ])),
-    batch_size=batch_size, shuffle=True
+    batch_size=batch_size, shuffle=False
 ) 
 
 class Encoder(nn.Module):
@@ -164,15 +174,67 @@ optimizer = torch.optim.Adam(anomdec_memae.parameters())
 loss_function = nn.BCELoss()
 
 anomdec_memae.train()
-for (x,) in tqdm(train_normals_loader):
-    y = x[:, :, 1:-1, 1:-1]
-    optimizer.zero_grad()
-    yhat, energy = anomdec_memae(x.view([x.shape[0], 1, 28, 28]))
-    loss = loss_function(yhat, y) + (.002 * energy).mean()
-    loss.backward()
-    optimizer.step()
-    #slowly augment the sparse regulariation for addressing
-    anomdec_memae.memory.lbd = min(anomdec_memae.memory.lbd + 1e-5, 0.01005)
-    print(loss.item(), energy.mean().item())
+for i in range(2):
+    for (x,) in tqdm(train_normals_loader):
+        y = x[:, :, 1:-1, 1:-1]
+        optimizer.zero_grad()
+        yhat, energy = anomdec_memae(x.view([x.shape[0], 1, 28, 28]))
+        loss = loss_function(yhat, y) + (.002 * energy).mean()
+        loss.backward()
+        optimizer.step()
+        #slowly augment the sparse regulariation for addressing
+        anomdec_memae.memory.lbd = min(anomdec_memae.memory.lbd + 1e-5, 0.01005)
+        print(loss.item(), energy.mean().item())
+
+# Try to classify 9 or not 9 after learning only on 9 on the test set after fining the optimal threshold a posteriori
+
+# Print the classical reconstruction error with normal AE (at 1.5 std)
+classic_recontruction = []
+labels = []
+for xx, yy in tqdm(test_loader):
+    classic_recontruction.extend(
+        ((classic_AE(xx) - xx[:, :, 1:-1, 1:-1]) ** 2).sum(1).sum(1).sum(1).detach().numpy()
+    )
+    labels.extend(yy.numpy())
+
+print(
+    "classical mean training reconstruction error on normal : ", 
+    np.array(classic_recontruction)[np.array(labels) == 9].mean()
+)
+print(
+    "classical mean training reconstruction error on abnormal : ", 
+    np.array(classic_recontruction)[np.array(labels) != 9].mean()
+)
+
+naive_th = np.array(classic_recontruction)[np.array(labels) == 9].mean() + 1.5 * np.array(classic_recontruction)[np.array(labels) == 9].std()
+
+print("classical AE f1 :",       f1_score(np.array(labels) == 9, classic_recontruction < naive_th))
+print("classical AE acc:", accuracy_score(np.array(labels) == 9, classic_recontruction < naive_th))
+
+
+# Compare with the new method
+memae_recontruction = []
+labels = []
+for xx, yy in tqdm(test_loader):
+    memae_recontruction.extend(
+        ((anomdec_memae(xx)[0] - xx[:, :, 1:-1, 1:-1]) ** 2).sum(1).sum(1).sum(1).detach().numpy()
+    )
+    labels.extend(yy.numpy())
+
+print(
+    "anomdec_memae mean training reconstruction error on normal : ", 
+    np.array(memae_recontruction)[np.array(labels) == 9].mean()
+)
+print(
+    "anomdec_memae mean training reconstruction error on abnormal : ", 
+    np.array(memae_recontruction)[np.array(labels) != 9].mean()
+)
+
+naive_th = np.array(memae_recontruction)[np.array(labels) == 9].mean() + 1.5 * np.array(memae_recontruction)[np.array(labels) == 9].std()
+
+print("memory AE f1 :",       f1_score(np.array(labels) == 9, memae_recontruction < naive_th))
+print("memory AE acc:", accuracy_score(np.array(labels) == 9, memae_recontruction < naive_th))
+
+
 
 
