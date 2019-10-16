@@ -25,7 +25,7 @@ class FCNetwork(nn.Module):
     Includes a `distillation_temperature` parameter to weights the confidency the network has in its output.
     """
 
-    def __init__(self, dim_input, dim_hidden, dim_output, dropout=0.1, distillation_temperature=1.0):
+    def __init__(self, dim_input, dim_hidden, dim_output, dropout=0., distillation_temperature=1.0):
         super(FCNetwork, self).__init__()
         self.distillation_temperature = distillation_temperature
         self.clf = nn.Sequential(
@@ -90,8 +90,7 @@ def main(path_dir_data, batch_size, nb_epochs, dropout, dim_hidden_teacher, dim_
     print("Accuracy model_teacher                    :", accuracy(model=model_teacher, test_loader=test_loader))
 
     # Learn the small network alone for comparisons
-    model_student = FCNetwork(dim_input=dim_input, dim_hidden=dim_hidden_student, dim_output=dim_output,
-                              dropout=dropout)
+    model_student = FCNetwork(dim_input=dim_input, dim_hidden=dim_hidden_student, dim_output=dim_output)
     optimizer = optim.Adam(model_student.parameters())
     criterion = nn.CrossEntropyLoss()
     train(model=model_student, optimizer=optimizer, criterion=criterion, train_loader=train_loader,
@@ -99,8 +98,7 @@ def main(path_dir_data, batch_size, nb_epochs, dropout, dim_hidden_teacher, dim_
     print("Accuracy model_student alone              :", accuracy(model=model_student, test_loader=test_loader))
 
     # Learn the same small network by distillation
-    model_student_d = FCNetwork(dim_input=dim_input, dim_hidden=dim_hidden_student, dim_output=dim_output,
-                                dropout=dropout)
+    model_student_d = FCNetwork(dim_input=dim_input, dim_hidden=dim_hidden_student, dim_output=dim_output)
     optimizer = optim.Adam(model_student_d.parameters())
     train_distillation(model_student=model_student_d, model_teacher=model_teacher, optimizer=optimizer,
                        train_loader=train_loader, nb_epochs=nb_epochs,
@@ -143,8 +141,8 @@ def accuracy(model, test_loader):
 
 
 def distillation_loss_function(model_pred, teach_pred, target, distillation_temperature, alpha=0.9):
-    return nn.KLDivLoss()(model_pred, teach_pred) * (distillation_temperature * distillation_temperature * alpha) +\
-        nn.CrossEntropyLoss()(model_pred, target) * (1 - alpha)
+    return nn.KLDivLoss()(model_pred, teach_pred) * (distillation_temperature ** 2 * 2. * alpha) \
+        + nn.CrossEntropyLoss()(model_pred, target) * (1 - alpha)
 
 
 def train_distillation(*, model_student, model_teacher, optimizer, train_loader, nb_epochs=32,
@@ -176,7 +174,7 @@ if __name__ == '__main__':
                         help='Path to the root directory containing the MNIST dataset')
     parser.add_argument('-b', "--batch-size", type=int, default=32,
                         help='Size of a dataset batch')
-    parser.add_argument('-e', "--epochs", type=int, default=32,
+    parser.add_argument('-e', "--epochs", type=int, default=1,
                         help='Number of epochs for each training')
     parser.add_argument('-d', "--dropout", type=float, default=0.1,
                         help='Dropout probability during training')
@@ -186,7 +184,7 @@ if __name__ == '__main__':
                         help='Dimensionality of the hidden layer for the students networks')
     parser.add_argument("-t", "--distillation-temperature", type=float, default=8.0,
                         help='Weights the confidency the network has in its output.')
-    parser.add_argument("-a", "--alpha", type=float, default=0.9,
+    parser.add_argument("-a", "--alpha", type=float, default=0.5,
                         help='Regularisation parameter for the distillation loss.')
     parser.add_argument("-s", "--seed", type=int, default=23,
                         help='Random seed to fix. No seed is fixed if none is provided')
