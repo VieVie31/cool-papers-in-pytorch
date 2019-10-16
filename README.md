@@ -11,6 +11,7 @@ Made in PyTorch.
 - Adversarial Discriminative Domain Adaptation (CVPR '17)
 - Adversarial Reprogramming of Neural Networks (ICLR'19)
 - Memorizing Normality to Detect Anomaly: Memory-augmented Deep Autoencoder for Unsupervised Anomaly Detection (pre-print)
-- more soon...
+- Grad-CAM: Visual Explanations from Deep Networks via Gradient-Based Localization (ICCV'17)
+- more soon…
 
 
