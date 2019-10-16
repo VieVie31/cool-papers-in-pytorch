@@ -30,15 +30,12 @@ class FCNetwork(nn.Module):
         self.distillation_temperature = distillation_temperature
         self.clf = nn.Sequential(
             nn.Linear(dim_input, dim_hidden),
-            nn.BatchNorm1d(dim_hidden),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(dim_hidden, dim_hidden),
-            nn.BatchNorm1d(dim_hidden),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.ReLU(),
-            nn.BatchNorm1d(dim_hidden),
             nn.Linear(dim_hidden, dim_output)
         )
         self.softmax = nn.Softmax(dim=1)
@@ -183,15 +180,15 @@ if __name__ == '__main__':
                         help='Number of epochs for each training')
     parser.add_argument('-d', "--dropout", type=float, default=0.1,
                         help='Dropout probability during training')
-    parser.add_argument("--dim-hidden-teacher", type=int, default=512,
+    parser.add_argument("--dim-hidden-teacher", type=int, default=1200,
                         help='Dimensionality of the hidden layer for the teacher network')
-    parser.add_argument("--dim-hidden-student", type=int, default=32,
+    parser.add_argument("--dim-hidden-student", type=int, default=800,
                         help='Dimensionality of the hidden layer for the students networks')
-    parser.add_argument("-t", "--distillation-temperature", type=float, default=20.0,
+    parser.add_argument("-t", "--distillation-temperature", type=float, default=8.0,
                         help='Weights the confidency the network has in its output.')
     parser.add_argument("-a", "--alpha", type=float, default=0.9,
                         help='Regularisation parameter for the distillation loss.')
-    parser.add_argument("-s", "--seed", type=int, default=None,
+    parser.add_argument("-s", "--seed", type=int, default=23,
                         help='Random seed to fix. No seed is fixed if none is provided')
     args = parser.parse_args()
 
