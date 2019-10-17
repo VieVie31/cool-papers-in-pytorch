@@ -16,8 +16,11 @@ import torch.nn.functional as F
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
-from tqdm import trange
+from tqdm import tqdm, trange
 from torch.autograd import Variable
+
+
+_FORMAT_PROGRESS_BAR = r"|{bar}|{n_fmt}/{total_fmt} epoch [{elapsed}<{remaining}]{postfix}"
 
 
 class FCNetwork(nn.Module):
@@ -78,93 +81,116 @@ def main(path_dir_data, batch_size, nb_epochs, dropout, dim_hidden_teacher, dim_
     )
 
     dim_input = 28 * 28  # MNIST picture's dim
-    dim_output = 10  # MNIST n° of classes
+    dim_output = 10  # MNIST number of classes
 
     # Learn the teacher alone
     model_teacher = FCNetwork(dim_input=dim_input, dim_hidden=dim_hidden_teacher, dim_output=dim_output,
                               dropout=dropout)
     optimizer = optim.Adam(model_teacher.parameters())
     criterion = nn.CrossEntropyLoss()
+    print("Training teacher :")
     train(model=model_teacher, optimizer=optimizer, criterion=criterion, train_loader=train_loader,
           test_loader=test_loader, nb_epochs=nb_epochs)
-    print("Accuracy model_teacher                    :", accuracy(model=model_teacher, test_loader=test_loader))
 
     # Learn the small network alone for comparisons
     model_student = FCNetwork(dim_input=dim_input, dim_hidden=dim_hidden_student, dim_output=dim_output)
     optimizer = optim.Adam(model_student.parameters())
     criterion = nn.CrossEntropyLoss()
+    print("\nTraining student alone :")
     train(model=model_student, optimizer=optimizer, criterion=criterion, train_loader=train_loader,
           test_loader=test_loader, nb_epochs=nb_epochs)
-    print("Accuracy model_student alone              :", accuracy(model=model_student, test_loader=test_loader))
 
     # Learn the same small network by distillation
     model_student_d = FCNetwork(dim_input=dim_input, dim_hidden=dim_hidden_student, dim_output=dim_output)
     optimizer = optim.Adam(model_student_d.parameters())
+    print("\nTraining student with teacher :")
     train_distillation(model_student=model_student_d, model_teacher=model_teacher, optimizer=optimizer,
-                       train_loader=train_loader, nb_epochs=nb_epochs,
+                       train_loader=train_loader, test_loader=test_loader, nb_epochs=nb_epochs,
                        distillation_temperature=distillation_temperature, alpha=alpha)
-    print("Accuracy model_student with model_teacher :", accuracy(model=model_student_d, test_loader=test_loader))
 
 
 def train(*, model, optimizer, criterion, train_loader, test_loader, nb_epochs=32):
-    for _ in trange(nb_epochs):
-        model.train()
-        loss_history = []
-        for x, target in train_loader:
-            x, target = Variable(x).view([x.shape[0], -1]), Variable(target)
-            out = model(x)
-            loss = criterion(out, target)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            loss_history.append(loss.item())
-        print(sum(loss_history) / len(loss_history), end='\t')
+    with tqdm(total=nb_epochs, bar_format=_FORMAT_PROGRESS_BAR) as progress_bar:
+        for _ in range(nb_epochs):
+            model.train()
+            loss_history = []
+            for x, target in train_loader:
+                x, target = Variable(x).view([x.shape[0], -1]), Variable(target)
+                out = model(x)
+                loss = criterion(out, target)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                loss_history.append(loss.item())
+            train_loss = sum(loss_history) / len(loss_history)
 
-        model.eval()
-        loss_history = []
-        for x, target in test_loader:
-            x, target = Variable(x).view([x.shape[0], -1]), Variable(target)
-            out = model(x)
-            loss = criterion(out, target)
-            loss_history.append(loss.item())
-        print(sum(loss_history) / len(loss_history))
+            model.eval()
+            loss_history = []
+            accuracy_history = []
+            for x, target in test_loader:
+                x, target = Variable(x).view([x.shape[0], -1]), Variable(target)
+                out = model(x)
+                loss = criterion(out, target)
+                loss_history.append(loss.item())
+                accuracy_history.append(sum(out.argmax(1) == target).item() / x.shape[0])
+            test_loss = sum(loss_history) / len(loss_history)
+            test_accuracy = sum(accuracy_history) / len(accuracy_history)
 
-
-def accuracy(model, test_loader):
-    model.eval()
-    t = []
-    for x, target in test_loader:
-        x, target = Variable(x).view([x.shape[0], -1]), Variable(target)
-        out = model(x)
-        t += [sum(out.argmax(1) == target).item() / x.shape[0]]
-    return np.array(t).mean()
-
-
-def distillation_loss_function(model_pred, teach_pred, target, distillation_temperature, alpha=0.9):
-    return nn.KLDivLoss()(model_pred, teach_pred) * (distillation_temperature ** 2 * 2. * alpha) \
-        + nn.CrossEntropyLoss()(model_pred, target) * (1 - alpha)
+            # Update the progress bar
+            progress_bar.update()
+            progress_bar.set_postfix({
+                "train_loss": "{0:.6f}".format(train_loss),
+                "test_loss": "{0:.6f}".format(test_loss),
+                "test_accuracy": "{0:.6f}".format(test_accuracy)
+            })
 
 
-def train_distillation(*, model_student, model_teacher, optimizer, train_loader, nb_epochs=32,
+def train_distillation(*, model_student, model_teacher, optimizer, train_loader, test_loader, nb_epochs=32,
                        distillation_temperature=20, alpha=0.9):
     model_student.distillation_temperature = distillation_temperature
     model_teacher.distillation_temperature = distillation_temperature
-    model_student.train()
     model_teacher.eval()
-    for i in trange(nb_epochs):
-        loss_history = []
-        for x, target in train_loader:
-            x, target = Variable(x).view([x.shape[0], -1]), Variable(target)
-            student_pred = model_student(x)
-            teacher_pred = model_teacher(x).detach()
-            loss = distillation_loss_function(student_pred, teacher_pred, target, alpha)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            loss_history.append(loss.item())
-        print(sum(loss_history) / float(len(loss_history)))
+    with tqdm(total=nb_epochs, bar_format=_FORMAT_PROGRESS_BAR) as progress_bar:
+        for _ in range(nb_epochs):
+            model_student.train()
+            loss_history = []
+            for x, target in train_loader:
+                x, target = Variable(x).view([x.shape[0], -1]), Variable(target)
+                student_pred = model_student(x)
+                teacher_pred = model_teacher(x).detach()
+                loss = distillation_loss_function(student_pred, teacher_pred, target, alpha)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                loss_history.append(loss.item())
+            train_loss = sum(loss_history) / len(loss_history)
+
+            model_student.eval()
+            loss_history = []
+            accuracy_history = []
+            for x, target in test_loader:
+                x, target = Variable(x).view([x.shape[0], -1]), Variable(target)
+                out = model_student(x)
+                loss = nn.CrossEntropyLoss()(out, target)
+                loss_history.append(loss.item())
+                accuracy_history.append(sum(out.argmax(1) == target).item() / x.shape[0])
+            test_loss = sum(loss_history) / len(loss_history)
+            test_accuracy = sum(accuracy_history) / len(accuracy_history)
+
+            # Update the progress bar
+            progress_bar.update()
+            progress_bar.set_postfix({
+                "train_loss": "{0:.6f}".format(train_loss),
+                "test_loss": "{0:.6f}".format(test_loss),
+                "test_accuracy": "{0:.6f}".format(test_accuracy)
+            })
     model_student.distillation_temperature = 1.0
     model_teacher.distillation_temperature = 1.0
+
+
+def distillation_loss_function(model_pred, teach_pred, target, distillation_temperature, alpha=0.9):
+    return nn.KLDivLoss(reduction='batchmean')(model_pred, teach_pred) * (distillation_temperature ** 2 * 2. * alpha) \
+        + nn.CrossEntropyLoss()(model_pred, target) * (1 - alpha)
 
 
 if __name__ == '__main__':
@@ -178,15 +204,15 @@ if __name__ == '__main__':
                         help='Number of epochs for each training')
     parser.add_argument('-d', "--dropout", type=float, default=0.1,
                         help='Dropout probability during training')
-    parser.add_argument("--dim-hidden-teacher", type=int, default=1200,
+    parser.add_argument("--dim-hidden-teacher", type=int, default=1024,
                         help='Dimensionality of the hidden layer for the teacher network')
-    parser.add_argument("--dim-hidden-student", type=int, default=800,
+    parser.add_argument("--dim-hidden-student", type=int, default=128,
                         help='Dimensionality of the hidden layer for the students networks')
     parser.add_argument("-t", "--distillation-temperature", type=float, default=8.0,
                         help='Weights the confidency the network has in its output.')
     parser.add_argument("-a", "--alpha", type=float, default=0.5,
                         help='Regularisation parameter for the distillation loss.')
-    parser.add_argument("-s", "--seed", type=int, default=23,
+    parser.add_argument("-s", "--seed", type=int, default=None,
                         help='Random seed to fix. No seed is fixed if none is provided')
     args = parser.parse_args()
 
