@@ -28,7 +28,7 @@ class FCNetwork(nn.Module):
     Includes a `distillation_temperature` parameter to weights the confidency the network has in its output.
     """
 
-    def __init__(self, dim_input, dim_hidden, dim_output, dropout=0., distillation_temperature=1.0):
+    def __init__(self, dim_input, dim_hidden, dim_output, dropout=0.0, distillation_temperature=1.0):
         super(FCNetwork, self).__init__()
         self.distillation_temperature = distillation_temperature
         self.clf = nn.Sequential(
@@ -39,7 +39,7 @@ class FCNetwork(nn.Module):
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.ReLU(),
-            nn.Linear(dim_hidden, dim_output)
+            nn.Linear(dim_hidden, dim_output),
         )
         self.softmax = nn.Softmax(dim=1)
 
@@ -50,15 +50,17 @@ class FCNetwork(nn.Module):
 
 
 def main(path_dir_data, batch_size, nb_epochs, dropout, dim_hidden_teacher, dim_hidden_student,
-         distillation_temperature, alpha, seed=None):
+         distillation_temperature, alpha, cuda, seed=None):
     if seed is not None:
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
         torch.backends.cudnn.deterministic = True
-        if torch.cuda.is_available():
+        if cuda and torch.cuda.is_available():
             torch.cuda.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)
+
+    device = torch.device("cuda" if (cuda and torch.cuda.is_available()) else "cpu")
 
     if not os.path.exists(path_dir_data):
         os.mkdir(path_dir_data)
@@ -71,13 +73,19 @@ def main(path_dir_data, batch_size, nb_epochs, dropout, dim_hidden_teacher, dim_
     train_loader = torch.utils.data.DataLoader(
         dataset=datasets.MNIST(root=path_dir_data, train=True, transform=transform, download=True),
         batch_size=batch_size,
-        shuffle=True
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        drop_last=False
     )
 
     test_loader = torch.utils.data.DataLoader(
         dataset=datasets.MNIST(root=path_dir_data, train=False, transform=transform, download=True),
         batch_size=batch_size,
-        shuffle=False
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        drop_last=False
     )
 
     dim_input = 28 * 28  # MNIST picture's dim
@@ -85,54 +93,56 @@ def main(path_dir_data, batch_size, nb_epochs, dropout, dim_hidden_teacher, dim_
 
     # Learn the teacher alone
     model_teacher = FCNetwork(dim_input=dim_input, dim_hidden=dim_hidden_teacher, dim_output=dim_output,
-                              dropout=dropout)
+                              dropout=dropout).to(device)
     optimizer = optim.Adam(model_teacher.parameters())
     criterion = nn.CrossEntropyLoss()
     print("Training teacher :")
     train(model=model_teacher, optimizer=optimizer, criterion=criterion, train_loader=train_loader,
-          test_loader=test_loader, nb_epochs=nb_epochs)
+          test_loader=test_loader, nb_epochs=nb_epochs, device=device)
 
     # Learn the small network alone for comparisons
-    model_student = FCNetwork(dim_input=dim_input, dim_hidden=dim_hidden_student, dim_output=dim_output)
+    model_student = FCNetwork(dim_input=dim_input, dim_hidden=dim_hidden_student, dim_output=dim_output).to(device)
     optimizer = optim.Adam(model_student.parameters())
     criterion = nn.CrossEntropyLoss()
     print("\nTraining student alone :")
     train(model=model_student, optimizer=optimizer, criterion=criterion, train_loader=train_loader,
-          test_loader=test_loader, nb_epochs=nb_epochs)
+          test_loader=test_loader, nb_epochs=nb_epochs, device=device)
 
     # Learn the same small network by distillation
-    model_student_d = FCNetwork(dim_input=dim_input, dim_hidden=dim_hidden_student, dim_output=dim_output)
+    model_student_d = FCNetwork(dim_input=dim_input, dim_hidden=dim_hidden_student, dim_output=dim_output).to(device)
     optimizer = optim.Adam(model_student_d.parameters())
     print("\nTraining student with teacher :")
     train_distillation(model_student=model_student_d, model_teacher=model_teacher, optimizer=optimizer,
                        train_loader=train_loader, test_loader=test_loader, nb_epochs=nb_epochs,
-                       distillation_temperature=distillation_temperature, alpha=alpha)
+                       distillation_temperature=distillation_temperature, alpha=alpha, device=device)
 
 
-def train(*, model, optimizer, criterion, train_loader, test_loader, nb_epochs=32):
+def train(*, model, optimizer, criterion, train_loader, test_loader, device, nb_epochs=10):
     with tqdm(total=nb_epochs, bar_format=_FORMAT_PROGRESS_BAR) as progress_bar:
         for _ in range(nb_epochs):
             model.train()
             loss_history = []
             for x, target in train_loader:
-                x, target = Variable(x).view([x.shape[0], -1]), Variable(target)
+                x = x.view([x.shape[0], -1]).to(device=device, non_blocking=True)
+                target = target.to(device=device, non_blocking=True)
                 out = model(x)
                 loss = criterion(out, target)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                loss_history.append(loss.item())
+                loss_history.append(loss.detach().cpu().item())
             train_loss = sum(loss_history) / len(loss_history)
 
             model.eval()
             loss_history = []
             accuracy_history = []
             for x, target in test_loader:
-                x, target = Variable(x).view([x.shape[0], -1]), Variable(target)
+                x = x.view([x.shape[0], -1]).to(device=device, non_blocking=True)
+                target = target.to(device=device, non_blocking=True)
                 out = model(x)
                 loss = criterion(out, target)
-                loss_history.append(loss.item())
-                accuracy_history.append(sum(out.argmax(1) == target).item() / x.shape[0])
+                loss_history.append(loss.detach().cpu().item())
+                accuracy_history.append(sum(out.argmax(1) == target).detach().cpu().item() / x.shape[0])
             test_loss = sum(loss_history) / len(loss_history)
             test_accuracy = sum(accuracy_history) / len(accuracy_history)
 
@@ -145,8 +155,8 @@ def train(*, model, optimizer, criterion, train_loader, test_loader, nb_epochs=3
             })
 
 
-def train_distillation(*, model_student, model_teacher, optimizer, train_loader, test_loader, nb_epochs=32,
-                       distillation_temperature=20, alpha=0.9):
+def train_distillation(*, model_student, model_teacher, optimizer, train_loader, test_loader, device, nb_epochs=10,
+                       distillation_temperature=20.0, alpha=0.7):
     model_student.distillation_temperature = distillation_temperature
     model_teacher.distillation_temperature = distillation_temperature
     model_teacher.eval()
@@ -155,25 +165,27 @@ def train_distillation(*, model_student, model_teacher, optimizer, train_loader,
             model_student.train()
             loss_history = []
             for x, target in train_loader:
-                x, target = Variable(x).view([x.shape[0], -1]), Variable(target)
+                x = x.view([x.shape[0], -1]).to(device=device, non_blocking=True)
+                target = target.to(device=device, non_blocking=True)
                 student_pred = model_student(x)
                 teacher_pred = model_teacher(x).detach()
-                loss = distillation_loss_function(student_pred, teacher_pred, target, alpha)
+                loss = criterion_distillation(student_pred, teacher_pred, target, alpha)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                loss_history.append(loss.item())
+                loss_history.append(loss.detach().cpu().item())
             train_loss = sum(loss_history) / len(loss_history)
 
             model_student.eval()
             loss_history = []
             accuracy_history = []
             for x, target in test_loader:
-                x, target = Variable(x).view([x.shape[0], -1]), Variable(target)
+                x = x.view([x.shape[0], -1]).to(device=device, non_blocking=True)
+                target = target.to(device=device, non_blocking=True)
                 out = model_student(x)
                 loss = nn.CrossEntropyLoss()(out, target)
-                loss_history.append(loss.item())
-                accuracy_history.append(sum(out.argmax(1) == target).item() / x.shape[0])
+                loss_history.append(loss.detach().cpu().item())
+                accuracy_history.append(sum(out.argmax(1) == target).detach().cpu().item() / x.shape[0])
             test_loss = sum(loss_history) / len(loss_history)
             test_accuracy = sum(accuracy_history) / len(accuracy_history)
 
@@ -188,7 +200,7 @@ def train_distillation(*, model_student, model_teacher, optimizer, train_loader,
     model_teacher.distillation_temperature = 1.0
 
 
-def distillation_loss_function(model_pred, teach_pred, target, distillation_temperature, alpha=0.9):
+def criterion_distillation(model_pred, teach_pred, target, distillation_temperature, alpha=0.7):
     return nn.KLDivLoss(reduction='batchmean')(model_pred, teach_pred) * (distillation_temperature ** 2 * 2. * alpha) \
         + nn.CrossEntropyLoss()(model_pred, target) * (1 - alpha)
 
@@ -198,20 +210,22 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("-p", '--path-dir-data', type=str, default="data",
                         help='Path to the root directory containing the MNIST dataset')
-    parser.add_argument('-b', "--batch-size", type=int, default=32,
+    parser.add_argument('-b', "--batch-size", type=int, default=128,
                         help='Size of a dataset batch')
-    parser.add_argument('-e', "--epochs", type=int, default=1,
+    parser.add_argument('-e', "--epoch", type=int, default=10,
                         help='Number of epochs for each training')
-    parser.add_argument('-d', "--dropout", type=float, default=0.1,
+    parser.add_argument('-d', "--dropout", type=float, default=0.8,
                         help='Dropout probability during training')
-    parser.add_argument("--dim-hidden-teacher", type=int, default=1024,
+    parser.add_argument("--dim-hidden-teacher", type=int, default=1200,
                         help='Dimensionality of the hidden layer for the teacher network')
-    parser.add_argument("--dim-hidden-student", type=int, default=128,
+    parser.add_argument("--dim-hidden-student", type=int, default=800,
                         help='Dimensionality of the hidden layer for the students networks')
-    parser.add_argument("-t", "--distillation-temperature", type=float, default=8.0,
+    parser.add_argument("-t", "--distillation-temperature", type=float, default=20.0,
                         help='Weights the confidency the network has in its output.')
-    parser.add_argument("-a", "--alpha", type=float, default=0.5,
+    parser.add_argument("-a", "--alpha", type=float, default=0.7,
                         help='Regularisation parameter for the distillation loss.')
+    parser.add_argument("-c", "--cuda", action='store_true',
+                        help='Train networks with cuda (if available)')
     parser.add_argument("-s", "--seed", type=int, default=None,
                         help='Random seed to fix. No seed is fixed if none is provided')
     args = parser.parse_args()
@@ -219,11 +233,12 @@ if __name__ == '__main__':
     main(
         path_dir_data=args.path_dir_data,
         batch_size=args.batch_size,
-        nb_epochs=args.epochs,
+        nb_epochs=args.epoch,
         dropout=args.dropout,
         dim_hidden_teacher=args.dim_hidden_teacher,
         dim_hidden_student=args.dim_hidden_student,
         distillation_temperature=args.distillation_temperature,
         alpha=args.alpha,
+        cuda=args.cuda,
         seed=args.seed
     )
